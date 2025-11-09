@@ -1,0 +1,2 @@
+player_id,expected_points,expected_score,expected_minutes,expected_usage,expected_efficiency,lower_ci,upper_ci,notes
+luka_doncic,31.127270575975082,31.127270575975082,33.25800000000001,35.20822,0.59445144,26.457364259998283,35.79717689195188,Injury status: Questionable

@@ -1,0 +1,3 @@
+timestamp,player_id,player_name,injury_status,projected_minutes,matchup,pace_context,vegas_total,opponent_def_rating,notes
+2025-11-09T13:54:38.143025,lebron_james,LeBron James,Probable,35,LAL@GSW,100.5,232.5,111.2,Facing uptempo opponent with weaker perimeter defense
+2025-11-10T09:15:00.000000,luka_doncic,Luka Doncic,Questionable,36,DAL@BOS,98.8,227.5,107.6,Boston likely to throw multiple wings; monitor ankle soreness from last game
