@@ -1,0 +1,2 @@
+player_id,expected_score,expected_minutes,expected_usage,expected_efficiency,lower_ci,upper_ci,notes
+lebron_james,52.306628499999995,33.80449999999999,29.9897,0.6154,47.306628499999995,57.306628499999995,Injury status: Probable
