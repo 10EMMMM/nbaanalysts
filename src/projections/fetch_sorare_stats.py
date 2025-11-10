@@ -31,12 +31,18 @@ API_URL = "https://api.sorare.com/graphql"
 USER_AGENT = "nbaanalysts/0.1 (+https://github.com/10EMMMM/nbaanalysts)"
 
 SIGN_IN_MUTATION = """
-mutation SignIn($input: SignInInput!) {
+mutation SignIn($input: signInInput!, $aud: String!) {
   signIn(input: $input) {
-    jwtToken
+    jwtToken(aud: $aud) {
+      token
+      expiredAt
+    }
     currentUser {
       slug
       email
+    }
+    errors {
+      message
     }
   }
 }
@@ -182,15 +188,20 @@ class SorareClient:
             raise RuntimeError(json.dumps(payload["errors"], indent=2))
         return payload["data"]
 
-    def sign_in(self, email: str, password: str) -> None:
+    def sign_in(self, email: str, password: str, audience: str = "SORARE") -> None:
         data = self._post(
             SIGN_IN_MUTATION,
-            {"input": {"email": email, "password": password}},
+            {"input": {"email": email, "password": password}, "aud": audience},
             auth=False,
         )
-        token = data.get("signIn", {}).get("jwtToken")
+        payload = data.get("signIn") or {}
+        errors = payload.get("errors") or []
+        if errors:
+            raise RuntimeError(f"Sorare authentication error: {errors}")
+        jwt = payload.get("jwtToken") or {}
+        token = jwt.get("token")
         if not token:
-            raise RuntimeError("Sorare authentication failed; token missing in response.")
+            raise RuntimeError("Sorare authentication failed; JWT token missing in response.")
         self.token = token
 
     def fetch_game_logs(self, player_slug: str, limit: int, query: str) -> Dict[str, Any]:
@@ -275,6 +286,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print rows to stdout instead of writing the CSV.",
     )
+    parser.add_argument(
+        "--jwt-audience",
+        default="SORARE",
+        help="Audience enum passed to jwtToken(aud: ...). Defaults to SORARE.",
+    )
     return parser.parse_args()
 
 
@@ -288,7 +304,7 @@ def main() -> None:
         raise SystemExit("Email and password are required.")
 
     client = SorareClient()
-    client.sign_in(email=email, password=password)
+    client.sign_in(email=email, password=password, audience=args.jwt_audience)
 
     query = _load_query_from_file(args.query_file)
     payload = client.fetch_game_logs(player_slug=args.player_slug, limit=args.games, query=query)
