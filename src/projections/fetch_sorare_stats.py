@@ -27,67 +27,54 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 
+from .sorare_auth import SorareAuthenticator
+
 API_URL = "https://api.sorare.com/graphql"
 USER_AGENT = "nbaanalysts/0.1 (+https://github.com/10EMMMM/nbaanalysts)"
-
-SIGN_IN_MUTATION = """
-mutation SignIn($input: signInInput!, $aud: String!) {
-  signIn(input: $input) {
-    jwtToken(aud: $aud) {
-      token
-      expiredAt
-    }
-    currentUser {
-      slug
-      email
-    }
-    errors {
-      message
-    }
-  }
-}
-"""
 
 # NOTE: Field names (nbaPlayer, gameLogs, stats, etc.) are based on the current
 # public Sorare API schema. Update them if Sorare renames anything.
 PLAYER_GAME_LOGS_QUERY = """
 query PlayerGameLogs($slug: String!, $limit: Int!) {
-  nbaPlayer(slug: $slug) {
-    slug
-    displayName
-    activeClub {
+  anyPlayer(slug: $slug) {
+    __typename
+    ... on NBAPlayer {
       slug
-      code
-      name
-    }
-    gameLogs(first: $limit, sortBy: START_DATE_DESC) {
-      nodes {
-        game {
-          uuid
-          startDate
-          homeTeam {
+      displayName
+      activeClub {
+        slug
+        code
+        name
+      }
+      gameLogs: nbaGameLogs(first: $limit, sortBy: START_DATE_DESC) {
+        nodes {
+          game {
+            uuid
+            startDate
+            homeTeam {
+              slug
+              code
+              name
+            }
+            awayTeam {
+              slug
+              code
+              name
+            }
+            pace
+            defensiveRating
+          }
+          team {
             slug
             code
             name
           }
-          awayTeam {
-            slug
-            code
-            name
+          stats {
+            minutes
+            usageRate
+            trueShootingPercentage
+            sorareScore
           }
-          pace
-          defensiveRating
-        }
-        team {
-          slug
-          code
-          name
-        }
-        stats {
-          minutes
-          usageRate
-          trueShootingPercentage
-          sorareScore
         }
       }
     }
@@ -169,40 +156,50 @@ class SorareClient:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
         self.token: Optional[str] = None
+        self.audience: Optional[str] = None
+        self.authenticator = SorareAuthenticator(user_agent=USER_AGENT, session=self.session)
 
-    def _post(self, query: str, variables: Optional[Dict[str, Any]] = None, *, auth: bool = False) -> Dict[str, Any]:
+    def _post(
+        self,
+        query: str,
+        variables: Optional[Dict[str, Any]] = None,
+        *,
+        auth: bool = False,
+    ) -> Dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if auth:
             if not self.token:
                 raise RuntimeError("Attempted authenticated request without a token.")
             headers["Authorization"] = f"Bearer {self.token}"
+            if self.audience:
+                headers["JWT-AUD"] = self.audience
         response = self.session.post(
             API_URL,
             json={"query": query, "variables": variables or {}},
             headers=headers,
             timeout=30,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            detail = self._format_error(response)
+            raise requests.HTTPError(f"{exc} | Response: {detail}") from exc
         payload = response.json()
         if "errors" in payload:
             raise RuntimeError(json.dumps(payload["errors"], indent=2))
         return payload["data"]
+    
+    @staticmethod
+    def _format_error(response: requests.Response) -> str:
+        try:
+            return json.dumps(response.json(), indent=2)
+        except ValueError:
+            return response.text
 
     def sign_in(self, email: str, password: str, audience: str = "SORARE") -> None:
-        data = self._post(
-            SIGN_IN_MUTATION,
-            {"input": {"email": email, "password": password}, "aud": audience},
-            auth=False,
-        )
-        payload = data.get("signIn") or {}
-        errors = payload.get("errors") or []
-        if errors:
-            raise RuntimeError(f"Sorare authentication error: {errors}")
-        jwt = payload.get("jwtToken") or {}
-        token = jwt.get("token")
-        if not token:
-            raise RuntimeError("Sorare authentication failed; JWT token missing in response.")
-        self.token = token
+        self.audience = audience
+        result = self.authenticator.authenticate_with_password(email, password, audience)
+        self.token = result.token
 
     def fetch_game_logs(self, player_slug: str, limit: int, query: str) -> Dict[str, Any]:
         if not self.token:
@@ -216,9 +213,11 @@ class SorareClient:
 
 
 def _rows_from_payload(payload: Dict[str, Any]) -> List[GameLogRow]:
-    player = payload.get("nbaPlayer")
+    player = payload.get("anyPlayer")
     if not player:
-        raise RuntimeError("Unexpected response shape: nbaPlayer missing.")
+        raise RuntimeError("Unexpected response shape: anyPlayer missing.")
+    if player.get("__typename") != "NBAPlayer":
+        raise RuntimeError(f"Slug does not reference an NBA player: typename={player.get('__typename')}")
     logs = (((player.get("gameLogs") or {}).get("nodes")) or [])
     rows: List[GameLogRow] = []
     for node in logs:
