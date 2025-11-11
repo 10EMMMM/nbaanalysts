@@ -4,6 +4,7 @@ import pandas as pd
 import argparse
 from datetime import datetime, timedelta
 import os
+import time
 from thefuzz import process
 
 def get_player_id(player_name):
@@ -262,6 +263,7 @@ def main():
 
     for player_name in player_names:
         process_player(player_name, args.seasons, output_file)
+        time.sleep(1) # Add a 1-second delay between player processing
 
 
 
