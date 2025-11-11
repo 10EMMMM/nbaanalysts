@@ -124,10 +124,12 @@ def main():
     parser = argparse.ArgumentParser(description="Calculate advanced stats for a given NBA player based on historical data.")
     parser.add_argument("player_name", nargs="?", default="Donte DiVincenzo", help="The name of the player to analyze.")
     parser.add_argument("--seasons", type=int, default=3, help="The number of past seasons to analyze.")
+    parser.add_argument("--output", help="The path to the CSV file to save the results to.") # Re-added output argument
     args = parser.parse_args()
 
     player_name = args.player_name
     num_seasons = args.seasons
+    output_file = args.output # Get output file from args
     
     player_id = get_player_id(player_name)
 
@@ -200,6 +202,25 @@ def main():
     composite_score = (baseline_aas * 0.4) + (l10_aas * 0.4) + (l10_opponent_adjusted_aas * 0.2)
     print(f"\n--- Composite Score ---")
     print(f"Predictive AAS: {composite_score:.2f}")
+
+    # Save results to CSV
+    if output_file:
+        results_to_save = {
+            "Player": player_name,
+            "Baseline_AAS": baseline_aas,
+            "AAS_Std_Dev": std_dev_aas,
+            "L10_AAS": trends.get('L10'),
+            "L30_AAS": trends.get('L30'),
+            "L50_AAS": trends.get('L50'),
+            "Home_AAS": home_aas,
+            "Away_AAS": away_aas,
+            "B2B_AAS": b2b_aas,
+            "Composite_Predictive_AAS": composite_score
+        }
+        results_df = pd.DataFrame([results_to_save])
+        file_exists = os.path.isfile(output_file)
+        results_df.to_csv(output_file, mode='a', header=not file_exists, index=False)
+        print(f"\nResults saved to {output_file}")
 
 
 if __name__ == "__main__":
