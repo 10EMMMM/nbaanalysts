@@ -219,7 +219,6 @@ def main():
     parser = argparse.ArgumentParser(description="Calculate advanced stats for a list of NBA players based on historical data.")
     parser.add_argument("--input-file", default="data/player_list.txt", help="Path to a text file with player names (one per line).")
     parser.add_argument("--seasons", type=int, default=3, help="The number of past seasons to analyze.")
-    parser.add_argument("--output", help="The path to the CSV file to save the results to.")
     args = parser.parse_args()
 
     try:
@@ -228,8 +227,11 @@ def main():
     except FileNotFoundError:
         raise SystemExit(f"Input file not found: {args.input_file}")
 
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output_file = f"outputs/player_analysis_{timestamp}.csv"
+
     for player_name in player_names:
-        process_player(player_name, args.seasons, args.output)
+        process_player(player_name, args.seasons, output_file)
 
 
 
