@@ -26,10 +26,12 @@ query CurrentUser {
 """
 
 
+from .credentials import EMAIL, PASSWORD # Import credentials
+
 def main() -> None:
-    email = input("Sorare email: ").strip()
-    password = getpass("Sorare password (input hidden): ")
-    audience = input("JWT audience (default: nbaanalysts-cli): ").strip() or "nbaanalysts-cli"
+    email = EMAIL # Use imported email
+    password = PASSWORD # Use imported password
+    audience = "nbaanalysts-cli" # Hardcoded audience
 
     if not email or not password:
         raise SystemExit("Email and password are required.")

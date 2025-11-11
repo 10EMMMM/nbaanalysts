@@ -32,8 +32,8 @@ from .sorare_auth import SorareAuthenticator
 API_URL = "https://api.sorare.com/graphql"
 USER_AGENT = "nbaanalysts/0.1 (+https://github.com/10EMMMM/nbaanalysts)"
 
-# NOTE: Field names (nbaPlayer, gameLogs, stats, etc.) are based on the current
-# public Sorare API schema. Update them if Sorare renames anything.
+# NOTE: Field names are based on the current public Sorare API schema.
+# Update them if Sorare renames anything.
 PLAYER_GAME_LOGS_QUERY = """
 query PlayerGameLogs($slug: String!, $limit: Int!) {
   anyPlayer(slug: $slug) {
@@ -41,16 +41,13 @@ query PlayerGameLogs($slug: String!, $limit: Int!) {
     ... on NBAPlayer {
       slug
       displayName
-      activeClub {
-        slug
-        code
-        name
-      }
-      gameLogs: nbaGameLogs(first: $limit, sortBy: START_DATE_DESC) {
-        nodes {
-          game {
-            uuid
-            startDate
+      playerGameScores(last: $limit, lowCoverage: true) {
+        __typename
+        ... on BasketballPlayerGameScore {
+          score
+          position
+          basketballGame {
+            date
             homeTeam {
               slug
               code
@@ -61,19 +58,41 @@ query PlayerGameLogs($slug: String!, $limit: Int!) {
               code
               name
             }
-            pace
-            defensiveRating
+            homeStats {
+              stats {
+                name
+                value
+              }
+            }
+            awayStats {
+              stats {
+                name
+                value
+              }
+            }
           }
-          team {
-            slug
-            code
-            name
-          }
-          stats {
-            minutes
-            usageRate
-            trueShootingPercentage
-            sorareScore
+          basketballPlayerGameStats {
+            minsPlayed
+            points
+            rebounds
+            assists
+            steals
+            blocks
+            turnovers
+            threePointsMade
+            anyTeam {
+              __typename
+              ... on Club {
+                slug
+                code
+                name
+              }
+              ... on NationalTeam {
+                slug
+                code
+                name
+              }
+            }
           }
         }
       }
@@ -104,27 +123,59 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _infer_opponent(node: Dict[str, Any]) -> str:
-    game = node.get("game") or {}
-    team_info = node.get("team") or {}
-    player_team = team_info.get("code") or team_info.get("slug")
-    home = game.get("homeTeam", {}) or {}
-    away = game.get("awayTeam", {}) or {}
+def _team_identifier(team: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not team:
+        return None
+    for key in ("slug", "code", "name"):
+        value = team.get(key)
+        if value:
+            return str(value).lower()
+    return None
 
-    def _matches(team: Dict[str, Any]) -> bool:
-        return bool(
-            player_team
-            and (team.get("code") == player_team or team.get("slug") == player_team or team.get("name") == player_team)
-        )
 
-    if _matches(home):
-        opponent = away
-    elif _matches(away):
-        opponent = home
-    else:
-        # Default to away team so something is recorded even if team info is missing.
-        opponent = away or home
-    return opponent.get("code") or opponent.get("slug") or opponent.get("name") or "UNKNOWN"
+def _team_matches(team: Optional[Dict[str, Any]], identifier: Optional[str]) -> bool:
+    if not team or not identifier:
+        return False
+    identifier = identifier.lower()
+    for key in ("slug", "code", "name"):
+        value = team.get(key)
+        if isinstance(value, str) and value.lower() == identifier:
+            return True
+    return False
+
+
+def _team_side(player_team_id: Optional[str], home: Dict[str, Any], away: Dict[str, Any]) -> Optional[str]:
+    if _team_matches(home, player_team_id):
+        return "home"
+    if _team_matches(away, player_team_id):
+        return "away"
+    return None
+
+
+def _choose_opponent(
+    player_team_id: Optional[str],
+    home: Dict[str, Any],
+    away: Dict[str, Any],
+) -> tuple[Dict[str, Any], str]:
+    side = _team_side(player_team_id, home, away)
+    if side == "home":
+        return away or {}, "away"
+    if side == "away":
+        return home or {}, "home"
+    # Default to away team to record something even if mapping failed.
+    return (away or home or {}), ("away" if away else "home")
+
+
+def _stat_from_team(stats_section: Optional[Dict[str, Any]], *names: str) -> Optional[float]:
+    if not stats_section:
+        return None
+    stats_list = stats_section.get("stats") or []
+    lowered = [name.lower() for name in names]
+    for stat in stats_list:
+        label = str(stat.get("name") or "").lower()
+        if label in lowered:
+            return _safe_float(stat.get("value"))
+    return None
 
 
 @dataclass
@@ -218,19 +269,54 @@ def _rows_from_payload(payload: Dict[str, Any]) -> List[GameLogRow]:
         raise RuntimeError("Unexpected response shape: anyPlayer missing.")
     if player.get("__typename") != "NBAPlayer":
         raise RuntimeError(f"Slug does not reference an NBA player: typename={player.get('__typename')}")
-    logs = (((player.get("gameLogs") or {}).get("nodes")) or [])
+    scores = player.get("playerGameScores") or []
     rows: List[GameLogRow] = []
-    for node in logs:
-        stats = node.get("stats") or {}
+    for node in scores:
+        if node.get("__typename") != "BasketballPlayerGameScore":
+            continue
+        stats = node.get("basketballPlayerGameStats") or {}
+        game = node.get("basketballGame") or {}
+        home_team = game.get("homeTeam") or {}
+        away_team = game.get("awayTeam") or {}
+        player_team_id = _team_identifier(stats.get("anyTeam"))
+        opponent_team, opponent_side = _choose_opponent(player_team_id, home_team, away_team)
+        opponent_name = opponent_team.get("code") or opponent_team.get("slug") or opponent_team.get("name") or "UNKNOWN"
+
+        player_side = _team_side(player_team_id, home_team, away_team)
+        player_stats_section = (
+            game.get("homeStats")
+            if player_side == "home"
+            else game.get("awayStats")
+            if player_side == "away"
+            else None
+        )
+        opponent_stats_section = (
+            game.get("homeStats")
+            if opponent_side == "home"
+            else game.get("awayStats")
+            if opponent_side == "away"
+            else None
+        )
+
+        pace = _stat_from_team(player_stats_section, "pace") or _stat_from_team(
+            game.get("homeStats"), "pace"
+        ) or _stat_from_team(game.get("awayStats"), "pace")
+        opponent_def_rating = _stat_from_team(
+            opponent_stats_section,
+            "defensive_rating",
+            "def_rating",
+            "defrating",
+        )
+
         row = GameLogRow(
-            game_date=_iso_date(((node.get("game") or {}).get("startDate"))),
-            opponent=_infer_opponent(node),
-            minutes=_safe_float(stats.get("minutes")),
-            usage_rate=_safe_float(stats.get("usageRate")),
-            true_shooting_pct=_safe_float(stats.get("trueShootingPercentage")),
-            sorare_score=_safe_float(stats.get("sorareScore")),
-            pace=_safe_float((node.get("game") or {}).get("pace")),
-            opponent_def_rating=_safe_float((node.get("game") or {}).get("defensiveRating")),
+            game_date=_iso_date(game.get("date")),
+            opponent=opponent_name,
+            minutes=_safe_float(stats.get("minsPlayed")),
+            usage_rate=None,
+            true_shooting_pct=None,
+            sorare_score=_safe_float(node.get("score")),
+            pace=pace,
+            opponent_def_rating=opponent_def_rating,
         )
         rows.append(row)
     rows.sort(key=lambda r: r.game_date)
@@ -293,12 +379,16 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+from .credentials import EMAIL, PASSWORD # Import credentials
+
+def main(email: Optional[str] = None, password: Optional[str] = None) -> None:
     args = parse_args()
     output_path = args.output or Path("data/game_logs") / f"{args.player_slug}.csv"
 
-    email = input("Sorare email: ").strip()
-    password = getpass("Sorare password (input hidden): ")
+    # Use imported credentials
+    email = EMAIL
+    password = PASSWORD
+
     if not email or not password:
         raise SystemExit("Email and password are required.")
 
