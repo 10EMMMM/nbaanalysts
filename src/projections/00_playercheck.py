@@ -129,6 +129,21 @@ def identify_back_to_backs(df):
     df['IS_B2B'] = df['GAME_DATE'].diff(-1) == timedelta(days=1)
     return df
 
+def calculate_individual_stat_projections(df):
+    """
+    Calculates projected individual stats based on a weighted average of long-term and short-term performance.
+    """
+    stats_to_project = ["PTS", "REB", "AST", "STL", "BLK", "TOV", "FG3M"]
+    projections = {}
+
+    for stat in stats_to_project:
+        long_term_avg = df[stat].mean()
+        short_term_avg = df.head(10)[stat].mean()
+        projected_stat = (long_term_avg * 0.5) + (short_term_avg * 0.5)
+        projections[f"Projected_{stat}"] = projected_stat
+
+    return projections
+
 def process_player(player_name, num_seasons, output_file):
     """
     Processes a single player and prints their stats.
@@ -152,6 +167,7 @@ def process_player(player_name, num_seasons, output_file):
     baseline_aas, std_dev_aas, game_log_df_with_aas = calculate_baseline_stats(game_log_df)
     trends = calculate_short_term_trends(game_log_df_with_aas)
     game_log_df_with_aas = identify_back_to_backs(game_log_df_with_aas)
+    individual_projections = calculate_individual_stat_projections(game_log_df_with_aas)
 
     home_games = game_log_df_with_aas[game_log_df_with_aas['MATCHUP'].str.contains('vs.')]
     away_games = game_log_df_with_aas[game_log_df_with_aas['MATCHUP'].str.contains('@')]
@@ -205,6 +221,10 @@ def process_player(player_name, num_seasons, output_file):
     print(f"\n--- Composite Score ---")
     print(f"Predictive AAS: {composite_score:.2f}")
 
+    print(f"\n--- Individual Stat Projections ---")
+    for stat, value in individual_projections.items():
+        print(f"{stat}: {value:.2f}")
+
     # Save results to CSV
     if output_file:
         results_to_save = {
@@ -217,7 +237,8 @@ def process_player(player_name, num_seasons, output_file):
             "Home_AAS": home_aas,
             "Away_AAS": away_aas,
             "B2B_AAS": b2b_aas,
-            "Composite_Predictive_AAS": composite_score
+            "Composite_Predictive_AAS": composite_score,
+            **individual_projections
         }
         results_df = pd.DataFrame([results_to_save])
         file_exists = os.path.isfile(output_file)
