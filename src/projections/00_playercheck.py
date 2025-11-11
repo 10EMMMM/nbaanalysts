@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import os
 import time
 from thefuzz import process
+from requests.exceptions import ReadTimeout
 
 def get_player_id(player_name):
     """
@@ -40,16 +41,30 @@ def get_last_n_seasons(n):
         seasons.append(f"{start_year}-{end_year:02d}")
     return seasons
 
+def make_api_request(api_call, max_retries=3, delay=5, *args, **kwargs):
+    """
+    Makes an API request with a retry mechanism.
+    """
+    for attempt in range(max_retries):
+        try:
+            return api_call(*args, **kwargs)
+        except ReadTimeout:
+            print(f"API call timed out. Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+            time.sleep(delay)
+    print(f"API call failed after {max_retries} attempts.")
+    return None
+
 def get_player_game_log(player_id, seasons):
     """
     Gets the game log for a given player ID and a list of seasons.
     """
     all_games = []
     for season in seasons:
-        gamelog = playergamelog.PlayerGameLog(player_id=player_id, season=season)
-        df = gamelog.get_data_frames()[0]
-        df['SEASON'] = season
-        all_games.append(df)
+        gamelog = make_api_request(playergamelog.PlayerGameLog, player_id=player_id, season=season)
+        if gamelog:
+            df = gamelog.get_data_frames()[0]
+            df['SEASON'] = season
+            all_games.append(df)
     
     if not all_games:
         return pd.DataFrame()
@@ -62,13 +77,15 @@ def get_team_win_percentages(seasons):
     """
     win_percentages = {}
     for season in seasons:
-        standings = leaguestandings.LeagueStandings(season=season).get_data_frames()[0]
-        season_percentages = {}
-        for index, row in standings.iterrows():
-            team_id = row['TeamID']
-            team_abbreviation = teams.find_team_name_by_id(team_id)['abbreviation']
-            season_percentages[team_abbreviation] = row['WinPCT']
-        win_percentages[season] = season_percentages
+        standings = make_api_request(leaguestandings.LeagueStandings, season=season)
+        if standings:
+            season_percentages = {}
+            df = standings.get_data_frames()[0]
+            for index, row in df.iterrows():
+                team_id = row['TeamID']
+                team_abbreviation = teams.find_team_name_by_id(team_id)['abbreviation']
+                season_percentages[team_abbreviation] = row['WinPCT']
+            win_percentages[season] = season_percentages
     return win_percentages
 
 def calculate_aas(stats):
