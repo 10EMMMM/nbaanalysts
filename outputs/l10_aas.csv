@@ -1,11 +1,11 @@
-Player,Date,AAS
-Donte DiVincenzo,"Nov 09, 2025",26.8
-Donte DiVincenzo,"Nov 07, 2025",16.2
-Donte DiVincenzo,"Nov 05, 2025",29.6
-Donte DiVincenzo,"Nov 03, 2025",45.3
-Donte DiVincenzo,"Nov 01, 2025",30.6
-Donte DiVincenzo,"Oct 29, 2025",24.8
-Donte DiVincenzo,"Oct 27, 2025",22.6
-Donte DiVincenzo,"Oct 26, 2025",24.9
-Donte DiVincenzo,"Oct 24, 2025",25.0
-Donte DiVincenzo,"Oct 22, 2025",12.8
+Player,Team,Date,PTS,REB,AST,STL,BLK,TOV,FG3M,AAS
+Donte DiVincenzo,MIN,"Nov 09, 2025",8,4,4,2,1,0,1,28.8
+Donte DiVincenzo,MIN,"Nov 07, 2025",3,6,2,1,1,1,1,18.2
+Donte DiVincenzo,MIN,"Nov 05, 2025",21,3,4,1,0,2,5,34.6
+Donte DiVincenzo,MIN,"Nov 03, 2025",25,9,5,0,1,0,6,52.3
+Donte DiVincenzo,MIN,"Nov 01, 2025",18,3,4,1,0,0,5,35.6
+Donte DiVincenzo,MIN,"Oct 29, 2025",14,4,6,1,0,3,3,27.8
+Donte DiVincenzo,MIN,"Oct 27, 2025",12,3,4,1,0,1,3,25.6
+Donte DiVincenzo,MIN,"Oct 26, 2025",17,2,3,1,0,1,3,27.9
+Donte DiVincenzo,MIN,"Oct 24, 2025",13,0,4,2,0,0,3,28.0
+Donte DiVincenzo,MIN,"Oct 22, 2025",7,4,2,2,2,6,1,15.8

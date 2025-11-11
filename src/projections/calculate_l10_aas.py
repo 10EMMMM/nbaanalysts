@@ -29,9 +29,10 @@ def calculate_aas(stats):
     aas += stats["PTS"] * 1
     aas += stats["REB"] * 1.2
     aas += stats["AST"] * 1.5
-    aas += stats["BLK"] * 2
+    aas += stats["BLK"] * 3  # Corrected from *2 to *3
     aas += stats["STL"] * 3
     aas += stats["TOV"] * -2
+    aas += stats["FG3M"] * 1 # Added Made 3pt FG bonus
 
     # Check for double-double and triple-double
     double_digit_stats = 0
@@ -85,8 +86,30 @@ def main():
     print(f"L10 AAS for {player_name} ({season} season):\n")
     for index, game in last_10_games.iterrows():
         aas = calculate_aas(game)
-        results.append({"Player": player_name, "Date": game['GAME_DATE'], "AAS": aas})
-        print(f"Date: {game['GAME_DATE']}, AAS: {aas:.2f}")
+        
+        # Extract team from MATCHUP
+        matchup = game['MATCHUP']
+        if " vs. " in matchup:
+            team = matchup.split(" vs. ")[0]
+        elif " @ " in matchup:
+            team = matchup.split(" @ ")[0]
+        else:
+            team = "" # Should not happen if MATCHUP is always in expected format
+
+        results.append({
+            "Player": player_name,
+            "Team": team, # Added Team to results
+            "Date": game['GAME_DATE'],
+            "PTS": game['PTS'],
+            "REB": game['REB'],
+            "AST": game['AST'],
+            "STL": game['STL'],
+            "BLK": game['BLK'],
+            "TOV": game['TOV'],
+            "FG3M": game['FG3M'],
+            "AAS": aas
+        })
+        print(f"Date: {game['GAME_DATE']}, Team: {team}, PTS: {game['PTS']}, REB: {game['REB']}, AST: {game['AST']}, STL: {game['STL']}, BLK: {game['BLK']}, TOV: {game['TOV']}, FG3M: {game['FG3M']}, AAS: {aas:.2f}")
 
     if results:
         average_l10_aas = sum(r['AAS'] for r in results) / len(results)
