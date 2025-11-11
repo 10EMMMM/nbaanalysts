@@ -4,14 +4,23 @@ import pandas as pd
 import argparse
 from datetime import datetime, timedelta
 import os
+from thefuzz import process
 
 def get_player_id(player_name):
     """
-    Gets the player ID for a given player name.
+    Gets the player ID for a given player name, using fuzzy matching if necessary.
     """
     player = players.find_players_by_full_name(player_name)
     if not player:
-        return None
+        print(f"Could not find an exact match for {player_name}, trying fuzzy matching...")
+        all_players = players.get_active_players()
+        all_player_names = [p['full_name'] for p in all_players]
+        best_match = process.extractOne(player_name, all_player_names)
+        if best_match and best_match[1] > 80: # Confidence threshold
+            print(f"Found best match: {best_match[0]}")
+            return players.find_players_by_full_name(best_match[0])[0]['id']
+        else:
+            return None
     return player[0]['id']
 
 def get_last_n_seasons(n):
