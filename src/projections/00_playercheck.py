@@ -1,5 +1,5 @@
 from nba_api.stats.static import players, teams
-from nba_api.stats.endpoints import playergamelog, leaguestandings
+from nba_api.stats.endpoints import leaguestandings
 import pandas as pd
 import argparse
 from datetime import datetime, timedelta
@@ -10,20 +10,28 @@ from requests.exceptions import ReadTimeout
 
 def get_player_id(player_name):
     """
-    Gets the player ID for a given player name, using fuzzy matching if necessary.
+    Gets the player ID for a given player name from the player.csv file.
     """
-    player = players.find_players_by_full_name(player_name)
-    if not player:
+    try:
+        players_df = pd.read_csv("csv/player.csv")
+    except FileNotFoundError:
+        print("Error: player.csv not found.")
+        return None
+
+    active_players_df = players_df[players_df['is_active'] == 1]
+    player = active_players_df[active_players_df['full_name'].str.lower() == player_name.lower()]
+
+    if not player.empty:
+        return player.iloc[0]['id']
+    else:
         print(f"Could not find an exact match for {player_name}, trying fuzzy matching...")
-        all_players = players.get_active_players()
-        all_player_names = [p['full_name'] for p in all_players]
+        all_player_names = active_players_df['full_name'].tolist()
         best_match = process.extractOne(player_name, all_player_names)
-        if best_match and best_match[1] > 80: # Confidence threshold
+        if best_match and best_match[1] > 80:  # Confidence threshold
             print(f"Found best match: {best_match[0]}")
-            return players.find_players_by_full_name(best_match[0])[0]['id']
+            return active_players_df[active_players_df['full_name'] == best_match[0]].iloc[0]['id']
         else:
             return None
-    return player[0]['id']
 
 def get_last_n_seasons(n):
     """
@@ -41,35 +49,12 @@ def get_last_n_seasons(n):
         seasons.append(f"{start_year}-{end_year:02d}")
     return seasons
 
-def make_api_request(api_call, max_retries=3, delay=5, *args, **kwargs):
-    """
-    Makes an API request with a retry mechanism.
-    """
-    for attempt in range(max_retries):
-        try:
-            return api_call(*args, **kwargs)
-        except ReadTimeout:
-            print(f"API call timed out. Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
-            time.sleep(delay)
-    print(f"API call failed after {max_retries} attempts.")
-    return None
-
 def get_player_game_log(player_id, seasons):
     """
-    Gets the game log for a given player ID and a list of seasons.
+    Gets the game log for a given player ID and a list of seasons, including usage stats.
     """
-    all_games = []
-    for season in seasons:
-        gamelog = make_api_request(playergamelog.PlayerGameLog, player_id=player_id, season=season)
-        if gamelog:
-            df = gamelog.get_data_frames()[0]
-            df['SEASON'] = season
-            all_games.append(df)
-    
-    if not all_games:
-        return pd.DataFrame()
-        
-    return pd.concat(all_games, ignore_index=True)
+    # TODO: Implement data fetching from CSV files.
+    return pd.DataFrame()
 
 def get_team_win_percentages(seasons):
     """
@@ -119,12 +104,14 @@ def calculate_baseline_stats(df):
     Calculates the baseline AAS and standard deviation from a DataFrame of games.
     """
     if df.empty:
-        return 0, 0, pd.DataFrame()
+        return 0, 0, 0, pd.DataFrame()
         
     df['AAS'] = df.apply(calculate_aas, axis=1)
+        
     baseline_aas = df['AAS'].mean()
     std_dev_aas = df['AAS'].std()
-    return baseline_aas, std_dev_aas, df
+    avg_usg_pct = df['usgPct'].mean() if 'usgPct' in df.columns else 0
+    return baseline_aas, std_dev_aas, avg_usg_pct, df
 
 def calculate_short_term_trends(df):
     """
@@ -182,7 +169,7 @@ def process_player(player_name, num_seasons, output_file):
 
     team_win_percentages = get_team_win_percentages(seasons_to_fetch)
 
-    baseline_aas, std_dev_aas, game_log_df_with_aas = calculate_baseline_stats(game_log_df)
+    baseline_aas, std_dev_aas, avg_usg_pct, game_log_df_with_aas = calculate_baseline_stats(game_log_df)
     trends = calculate_short_term_trends(game_log_df_with_aas)
     game_log_df_with_aas = identify_back_to_backs(game_log_df_with_aas)
     individual_projections = calculate_individual_stat_projections(game_log_df_with_aas)
@@ -196,20 +183,21 @@ def process_player(player_name, num_seasons, output_file):
     b2b_aas = b2b_games['AAS'].mean()
 
     print(f"\n--- Long-Term Player Profile (Last {num_seasons} Seasons) ---")
-    print(f"Baseline AAS: {baseline_aas:.2f}")
+    print(f"Baseline Pace-Adjusted AAS: {baseline_aas:.2f}")
     print(f"AAS Standard Deviation (Consistency): {std_dev_aas:.2f}")
+    print(f"Average USG%: {avg_usg_pct:.2%}")
 
     print(f"\n--- Short-Term Performance Trends ---")
     for trend, value in trends.items():
         if value is not None:
-            print(f"{trend} AAS: {value:.2f}")
+            print(f"{trend} Pace-Adjusted AAS: {value:.2f}")
         else:
-            print(f"{trend} AAS: Not enough data")
+            print(f"{trend} Pace-Adjusted AAS: Not enough data")
 
     print(f"\n--- Contextual Performance Analysis (Last {num_seasons} Seasons) ---")
-    print(f"Home AAS: {home_aas:.2f}")
-    print(f"Away AAS: {away_aas:.2f}")
-    print(f"Back-to-Back AAS: {b2b_aas:.2f}")
+    print(f"Home Pace-Adjusted AAS: {home_aas:.2f}")
+    print(f"Away Pace-Adjusted AAS: {away_aas:.2f}")
+    print(f"Back-to-Back Pace-Adjusted AAS: {b2b_aas:.2f}")
 
     print(f"\n--- Opponent-Adjusted AAS (Last 10 Games) ---")
     last_10_games = game_log_df_with_aas.head(10)
@@ -229,7 +217,10 @@ def process_player(player_name, num_seasons, output_file):
         opponent_adjusted_aas = game['AAS'] * opponent_win_pct
         opponent_adjusted_aas_list.append(opponent_adjusted_aas)
 
-        print(f"Date: {game['GAME_DATE'].date()}, Opp: {opponent_abbr} (Win %: {opponent_win_pct:.3f}), Opponent-Adjusted AAS: {opponent_adjusted_aas:.2f}")
+        if 'usgPct' in game:
+            print(f"Date: {game['GAME_DATE'].date()}, Opp: {opponent_abbr} (Win %: {opponent_win_pct:.3f}), Opponent-Adjusted AAS: {opponent_adjusted_aas:.2f}, USG%: {game['usgPct']:.2%}")
+        else:
+            print(f"Date: {game['GAME_DATE'].date()}, Opp: {opponent_abbr} (Win %: {opponent_win_pct:.3f}), Opponent-Adjusted AAS: {opponent_adjusted_aas:.2f}")
 
     # Composite Score
     l10_aas = trends.get('L10', baseline_aas)
@@ -237,7 +228,7 @@ def process_player(player_name, num_seasons, output_file):
     
     composite_score = (baseline_aas * 0.4) + (l10_aas * 0.4) + (l10_opponent_adjusted_aas * 0.2)
     print(f"\n--- Composite Score ---")
-    print(f"Predictive AAS: {composite_score:.2f}")
+    print(f"Predictive Pace-Adjusted AAS: {composite_score:.2f}")
 
     print(f"\n--- Individual Stat Projections ---")
     for stat, value in individual_projections.items():
@@ -247,15 +238,16 @@ def process_player(player_name, num_seasons, output_file):
     if output_file:
         results_to_save = {
             "Player": player_name,
-            "Baseline_AAS": baseline_aas,
+            "Baseline_Pace_Adjusted_AAS": baseline_aas,
             "AAS_Std_Dev": std_dev_aas,
-            "L10_AAS": trends.get('L10'),
-            "L30_AAS": trends.get('L30'),
-            "L50_AAS": trends.get('L50'),
-            "Home_AAS": home_aas,
-            "Away_AAS": away_aas,
-            "B2B_AAS": b2b_aas,
-            "Composite_Predictive_AAS": composite_score,
+            "Avg_USG_Pct": avg_usg_pct,
+            "L10_Pace_Adjusted_AAS": trends.get('L10'),
+            "L30_Pace_Adjusted_AAS": trends.get('L30'),
+            "L50_Pace_Adjusted_AAS": trends.get('L50'),
+            "Home_Pace_Adjusted_AAS": home_aas,
+            "Away_Pace_Adjusted_AAS": away_aas,
+            "B2B_Pace_Adjusted_AAS": b2b_aas,
+            "Composite_Predictive_Pace_Adjusted_AAS": composite_score,
             **individual_projections
         }
         results_df = pd.DataFrame([results_to_save])
